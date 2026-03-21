@@ -1,0 +1,73 @@
+###############################################################################
+# AnythingLLM + OAuth2 Proxy (Logto OIDC SSO) — Coolify-ready
+#
+# Environment variables (set in Coolify or .env):
+#   OIDC_ISSUER_URL          – Logto OIDC issuer (e.g. https://auth.example.com/oidc)
+#   OIDC_CLIENT_ID           – OAuth2 client ID from Logto
+#   OIDC_CLIENT_SECRET       – OAuth2 client secret from Logto
+#   OAUTH2_PROXY_COOKIE_SECRET – 32-byte base64 secret for cookie encryption
+#   OAUTH2_PROXY_REDIRECT_URL  – e.g. https://llm.example.com/oauth2/callback
+###############################################################################
+
+name: anythingllm
+
+networks:
+  anythingllm:
+    driver: bridge
+
+services:
+  # ---- AnythingLLM (upstream official image) --------------------------------
+  anythingllm:
+    image: mintplexlabs/anythingllm:latest
+    container_name: anythingllm
+    cap_add:
+      - SYS_ADMIN
+    volumes:
+      - anythingllm_storage:/app/server/storage
+      - anythingllm_hotdir:/app/collector/hotdir
+      - anythingllm_outputs:/app/collector/outputs
+    environment:
+      - STORAGE_DIR=/app/server/storage
+    networks:
+      - anythingllm
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # ---- OAuth2 Proxy (Logto OIDC SSO gateway) --------------------------------
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:latest
+    container_name: oauth2-proxy
+    depends_on:
+      - anythingllm
+    ports:
+      - "443:4180"
+    environment:
+      # --- OIDC / Logto -------------------------------------------------------
+      OAUTH2_PROXY_PROVIDER: oidc
+      OAUTH2_PROXY_OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-https://auth.example.com/oidc}
+      OAUTH2_PROXY_CLIENT_ID: ${OIDC_CLIENT_ID:-change-me}
+      OAUTH2_PROXY_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-change-me}
+      OAUTH2_PROXY_COOKIE_SECRET: ${OAUTH2_PROXY_COOKIE_SECRET:-change-me-32-byte-base64-secret!}
+      OAUTH2_PROXY_REDIRECT_URL: ${OAUTH2_PROXY_REDIRECT_URL:-https://llm.example.com/oauth2/callback}
+
+      # --- Upstream (AnythingLLM on port 3001) --------------------------------
+      OAUTH2_PROXY_UPSTREAMS: http://anythingllm:3001
+      OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
+
+      # --- Behaviour ----------------------------------------------------------
+      OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+      OAUTH2_PROXY_PASS_ACCESS_TOKEN: "true"
+      OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "true"
+      OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
+      OAUTH2_PROXY_COOKIE_SECURE: "true"
+      OAUTH2_PROXY_REVERSE_PROXY: "true"
+      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+    networks:
+      - anythingllm
+    restart: unless-stopped
+
+volumes:
+  anythingllm_storage:
+  anythingllm_hotdir:
+  anythingllm_outputs:
